@@ -370,7 +370,7 @@ for m in meses5:
     principal = [lin for lin in rs if lin[6] not in ('Taxa de Rescisão', 'Visita Improdutiva')]
     dm = [f for f in docs5 if f['mes_uso'] == m]
     vencs = sorted({brd(f['vencimento']) for f in dm})
-    pagos = [brd(f['pago_em']) for f in dm]
+    pagos = [brd(f['pago_em']) for f in dm if not f['situacao'].startswith('Contestado')]  # contestadas não entram
     resumo.append([mes_data(m), vencs[0] if vencs else None, ' + '.join(nome_doc(f['documento']) for f in dm),
                    len({lin[3] for lin in principal}), round(sum(lin[9] or 0 for lin in principal), 2),
                    round(sum(lin[9] or 0 for lin in rs if lin not in principal), 2), round(sum(lin[9] or 0 for lin in rs), 2),

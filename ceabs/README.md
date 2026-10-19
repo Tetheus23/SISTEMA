@@ -18,5 +18,6 @@ Os dados e as planilhas geradas ficam em `entregas/ceabs/`, que não é versiona
 1. `montar_painel.py <pasta> <saida.xlsx>`: Painel, veículos do mês, Contestar CEABS, Equipamentos, Retiradas, Faturas e Base.
 2. `dinamicas.py <entrada.xlsx> <saida.xlsx>`: insere as tabelas dinâmicas reais (DataPilot do LibreOffice) e salva em .xlsx.
 3. `historico_cobrancas.py <pasta> <saida.xlsx>`: planilha limpa com o histórico item a item (colunas da CEABS + mês apurado, vencimento, notas, valor sem imposto rateado do boleto, pagamento, cliente e status) e um painel com os casos por status e os últimos 5 meses. Com um 3º argumento (a planilha devolvida com ajustes), STATUS, clientes, pagamento e observações vêm dela.
+4. `processo_pagamento.py <historico.xlsx> <forpag.xlsb> <AAAA-MM> <saida> <pdfs>`: processo de pagamento no padrão da Ticket Log (FORPAG preenchido, notas e boletos, relatório resumido e consolidado em um PDF) e o e-mail para a diretoria.
 
 `parse_docs.py` lê NFS-e e boletos em PDF; `montar_relatorio.py` é o relatório antigo (substituído pelo painel).
