@@ -17,5 +17,6 @@ Os dados e as planilhas geradas ficam em `entregas/ceabs/`, que não é versiona
 ## 3. Planilha
 1. `montar_painel.py <pasta> <saida.xlsx>`: Painel, veículos do mês, Contestar CEABS, Equipamentos, Retiradas, Faturas e Base.
 2. `dinamicas.py <entrada.xlsx> <saida.xlsx>`: insere as tabelas dinâmicas reais (DataPilot do LibreOffice) e salva em .xlsx.
+3. `historico_cobrancas.py <pasta> <saida.xlsx>`: planilha limpa com o histórico item a item (colunas da CEABS + mês apurado, vencimento, notas, valor sem imposto rateado do boleto, pagamento, cliente e status) e um painel com os casos por status e os últimos 5 meses.
 
 `parse_docs.py` lê NFS-e e boletos em PDF; `montar_relatorio.py` é o relatório antigo (substituído pelo painel).
