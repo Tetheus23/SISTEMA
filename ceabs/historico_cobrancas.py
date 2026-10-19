@@ -1,6 +1,6 @@
 """Planilha limpa da CEABS: histórico de cobranças item a item + painel dos casos e dos últimos 5 meses.
 
-Uso: python3 -I historico_cobrancas.py <pasta_ceabs> <saida.xlsx>   (rodar depois de pipeline.sh)
+Uso: python3 -I historico_cobrancas.py <pasta_ceabs> <saida.xlsx> [planilha_revisada.xlsx]   (rodar depois de pipeline.sh)
 Abas:
   Painel     resumo por status, últimos 5 meses (equipamentos, valor cheio, líquido, pagamento),
              notas desses meses, casos para tratar e pendências
@@ -8,6 +8,8 @@ Abas:
              mês apurado, vencimento, notas, valor sem imposto, pagamento, cliente, status e observações
 VALOR SEM IMPOSTO: o líquido das notas (boleto) do mês e produto rateado entre os itens, proporcional ao valor a
 faturar; a soma de cada grupo bate com o boleto ao centavo.
+Planilha revisada: a mesma planilha devolvida com ajustes na aba Histórico. STATUS, CLIENTE NO PERÍODO, CLIENTE ATUAL,
+DATA DE PAGAMENTO e OBSERVAÇÕES vêm dela; STATUS e CLIENTE ATUAL valem pela linha mais recente de cada veículo.
 """
 import csv
 import datetime as dt
@@ -16,7 +18,7 @@ import re
 import sys
 from collections import Counter, defaultdict
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -26,6 +28,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 BASE = sys.argv[1]
 SAIDA = sys.argv[2]
+REVISADA = sys.argv[3] if len(sys.argv) > 3 else None
 EST = os.path.join(BASE, 'estrutura')
 HOJE = dt.date(2026, 10, 19)
 GRILLO = 'LOCADORA GRILLO E RIBEIRO LTDA'
@@ -46,6 +49,7 @@ ACAO = dict(zip(STATUS, ['Em uso. Nada a fazer.',
                          'Confirmar a retirada: a CEABS cobra R$ 400 por equipamento não devolvido.']))
 CLASSE = {'Principal': 'Mensalidade', 'Taxa de Rescisão': 'Taxa de rescisão', 'Visita Improdutiva': 'Visita improdutiva'}
 ORDEM_TIPO = {'Principal': 0, 'Taxa de Rescisão': 1, 'Visita Improdutiva': 2}
+L0 = 2  # aba Histórico: linha 1 = totais do que estiver filtrado, linha 2 = cabeçalho
 
 
 def ler(nome):
@@ -115,7 +119,17 @@ for b in sorted(base, key=lambda x: x['mes_uso']):
         local[(b['mes_uso'], b['chassi'])] = b['local_no_mes']
 
 
-def cliente_no_mes(mes, ch):
+def dia(v):
+    return v.date() if isinstance(v, dt.datetime) else v
+
+
+def chave(codigo, mes, produto, valor, chassi):
+    return codigo, mes, produto, round(valor or 0, 2), chassi
+
+
+def cliente_no_mes(mes, ch, r=None):
+    if r is not None and id(r) in revisado:
+        return revisado[id(r)]['CLIENTE NO PERÍODO DA MEDIÇÃO'] or ''
     if (mes, ch) in local:
         return local[(mes, ch)]
     antes = [m for (m, c) in local if c == ch and m <= mes]  # taxa/visita sem mensalidade no mês: último local conhecido
@@ -123,6 +137,8 @@ def cliente_no_mes(mes, ch):
 
 
 def cliente_atual(ch):
+    if ch in cliente_rev:
+        return cliente_rev[ch]
     f = info.get(ch)
     if not f:
         return 'Não localizado na frota'
@@ -199,6 +215,31 @@ sem_item = set(status) - {r['chassi'] for r in itens}
 if sem_item:
     print('AVISO: chassis da lista de retiradas sem item na medição:', sorted(sem_item))
 
+# ---------- ajustes da planilha revisada ----------
+revisado, cliente_rev = {}, {}  # id(item) -> linha revisada; chassi -> cliente atual revisado
+if REVISADA:
+    ws_r = load_workbook(REVISADA, data_only=True)['Histórico']
+    cab = [c.value for c in ws_r[L0]]
+    fila = defaultdict(list)
+    for x in ws_r.iter_rows(min_row=L0 + 1, values_only=True):
+        r = dict(zip(cab, x))
+        if r.get('Código'):
+            mes = dia(r['MÊS/ANO APURADO'])
+            fila[chave(r['Código'], mes.strftime('%Y-%m') if mes else '', r['Produto'], r['Valor a Faturar'], r['Chassi'])].append(r)
+    for r in itens:
+        lst = fila.get(chave(r['codigo'], r['mes_uso'], r['produto'], num(r['valor']), r['chassi']))
+        if lst:
+            revisado[id(r)] = lst.pop(0)
+    sobra = sum(len(v) for v in fila.values())
+    print(f'revisada: {len(revisado)} de {len(itens)} itens casados', f'| AVISO: {sobra} linhas da revisada sem item' if sobra else '')
+    # situação atual = a da linha mais recente do veículo (mensalidade antes de taxa/visita)
+    for r in sorted((r for r in itens if id(r) in revisado), key=lambda x: (x['mes_uso'], -ORDEM_TIPO[x['tipo']])):
+        rv = revisado[id(r)]
+        if rv['STATUS'] in STATUS:
+            status[r['chassi']] = rv['STATUS']
+        if rv['CLIENTE ATUAL']:
+            cliente_rev[r['chassi']] = rv['CLIENTE ATUAL']
+
 # ---------- planilha ----------
 wb = Workbook()
 painel = wb.active
@@ -212,19 +253,20 @@ NOVAS = ['MÊS/ANO APURADO', 'MÊS/ANO VENCIMENTO', 'NOTAS FISCAIS', 'VALOR SEM 
 TITULOS = ORIGINAIS + NOVAS
 LARG = [12, 12, 15, 17, 20, 10, 18, 14, 11, 13, 12, 14, 12, 11, 13, 26, 13, 13, 13, 30, 28, 30, 30]
 FORMATO = {8: BRL, 9: BRL, 10: BRL, 11: DATA, 12: DATA, 13: DATA, 14: MES, 15: MES, 17: BRL, 18: DATA, 19: DATA}
-L0 = 2  # linha 1: totais do que estiver filtrado
 
 linhas = []
 for r in sorted(itens, key=lambda x: (x['mes_uso'], -ORDEM_TIPO[x['tipo']], x['placa'] or (info.get(x['chassi']) or {}).get('placa', '')),
                 reverse=True):
     fz = fiscal.get(id(r), {})
+    rv = revisado.get(id(r), {})
     venc = fz.get('venc')
     placa = r['placa'] or (info.get(r['chassi']) or {}).get('placa', '')
     linhas.append([GRILLO, GRILLO, CNPJ, r['codigo'], r['chassi'], placa, r['produto'], num(r['mensal']), num(r['prorata']),
                    num(r['valor']), iso(r['instalacao']), iso(r['cancelamento']), iso(r['retirada']),
                    mes_data(r['mes_uso']), dt.date(venc.year, venc.month, 1) if venc else None, fz.get('notas', ''),
-                   fz.get('liquido'), venc, fz.get('pago'), cliente_no_mes(r['mes_uso'], r['chassi']),
-                   cliente_atual(r['chassi']), status[r['chassi']], None])
+                   fz.get('liquido'), venc, dia(rv.get('DATA DE PAGAMENTO')) or fz.get('pago'),
+                   cliente_no_mes(r['mes_uso'], r['chassi'], r), cliente_atual(r['chassi']), status[r['chassi']],
+                   rv.get('OBSERVAÇÕES')])
 
 for c, t in enumerate(TITULOS, 1):
     cel = hist.cell(L0, c, t)
@@ -295,6 +337,9 @@ ws['A1'].font = Font(bold=True, size=16, color=AZUL)
 ws['A2'] = (f'Contrato 40010217 - {GRILLO} - posição em {HOJE:%d/%m/%Y}. Fonte: planilhas de medição da CEABS, '
             'NFS-e/faturas e boletos, base da frota. O detalhe item a item está na aba Histórico.')
 ws['A2'].font = Font(italic=True, color=CINZA)
+if REVISADA:
+    ws['A3'] = f'Status e clientes revisados pelo Matheus em {HOJE:%d/%m/%Y} (principalmente o mês apurado {mes_txt(ult_mes)}).'
+    ws['A3'].font = Font(italic=True, bold=True, color=LARANJA)
 
 # 1. resumo por status
 veic_ult = defaultdict(lambda: [set(), 0.0, 0.0])
