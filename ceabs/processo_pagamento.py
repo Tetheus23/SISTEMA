@@ -231,7 +231,8 @@ h1 { font-size: 17pt; color: #1F3A5F; margin: 0; }
 .sub { color: #555; margin: 1px 0 8px; }
 h2 { font-size: 11.5pt; color: #1F3A5F; border-left: 4px solid #2a78d6; padding-left: 6px; margin: 12px 0 5px; }
 .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 4px; }
-.duas { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.duas { display: grid; grid-template-columns: 1.15fr 1fr; gap: 12px; }
+tr.grupo td { border-top: 1px solid #9BB7D4; }
 .card { border: 1px solid #d6dde6; border-radius: 4px; padding: 6px 8px; }
 .card.forte { background: #1F3A5F; color: #fff; border-color: #1F3A5F; }
 .card .r { font-size: 7pt; text-transform: uppercase; color: #6b7280; letter-spacing: .3px; }
@@ -313,9 +314,33 @@ for r in itens:
     veic[r['Placa']] = r
 pedir = sorted(p for p, r in veic.items() if r['STATUS'] == 'PEDIR CANCELAMENTO')
 solicitado = sorted((p for p, r in veic.items() if r['STATUS'] == 'JÁ SOLICITADO CANCELAMENTO'), key=lambda p: (pedido_em.get(p, ''), p))
-cli = Counter(r['CLIENTE NO PERÍODO DA MEDIÇÃO'] or '(sem registro)' for r in veic.values())
-lin_cli = [[c, n] for c, n in sorted(cli.items(), key=lambda kv: (-kv[1], kv[0]))] + [['Total', len(veic)]]
+cli = defaultdict(Counter)  # cliente -> status -> veículos (pode estar cobrando, mas já cancelado ou a cancelar)
+for r in veic.values():
+    cli[r['CLIENTE NO PERÍODO DA MEDIÇÃO'] or '(sem registro)'][r['STATUS']] += 1
+lin_cli, grupo_cli = [], {}
+for c, sts in sorted(cli.items(), key=lambda kv: (-sum(kv[1].values()), kv[0])):
+    grupo_cli[len(lin_cli)] = 'grupo'
+    for k, (st, n) in enumerate(sorted(sts.items(), key=lambda kv: STATUS.index(kv[0]))):
+        lin_cli.append([c if k == 0 else '', st, n])
+grupo_cli[len(lin_cli)] = 'tot'
+lin_cli.append(['Total', '', len(veic)])
 var = lambda a, b: f'{(a / b - 1) * 100:+.1f}%'.replace('.', ',') if b else ''
+# histórico de pagamentos: 3 meses anteriores (notas pagas; as contestadas ficam de fora) e o mês deste processo
+_, meses_painel = painel[2]   # mês apurado, vencimento, notas, equipamentos, ...
+_, notas_painel = painel[3]   # mês apurado, nota, tipo, vencimento, bruto, líquido, pagamento, situação
+veic_mes = {x[0]: x[3] for x in meses_painel}
+lin_pag, contestadas = [], []
+for m in sorted({x[0] for x in notas_painel if x[0] < ref})[-3:]:
+    ns = [x for x in notas_painel if x[0] == m and not str(x[7]).startswith('Contestado')]
+    contestadas += [x for x in notas_painel if x[0] == m and str(x[7]).startswith('Contestado')]
+    pagos = [x[6] for x in ns]
+    lin_pag.append([mes_txt(m), mes_txt(min(x[3] for x in ns)), veic_mes.get(m, ''), brl(sum(x[4] for x in ns)),
+                    brl(sum(x[5] for x in ns)), data(max(pagos)) if all(pagos) else 'em aberto'])
+lin_pag.append([mes_txt(ref), mes_txt(dt.datetime.strptime(vencimento, '%d/%m/%Y')), n_equip, brl(cheio), brl(total_pagar), 'a pagar'])
+nota_pag = ''
+if contestadas:
+    nota_pag = (f'Fora do histórico: {" e ".join(x[1] for x in contestadas)} ({", ".join(sorted({str(x[2]).lower() for x in contestadas}))}, '
+                f'{brl(sum(x[4] for x in contestadas))}), contestadas com a CEABS e não pagas.')
 h3 = f"""{topo()}
 <div class="secao">3 · RELATÓRIO RESUMIDO</div>
 <h1>CEABS · Rastreadores · {ROTULO}</h1>
@@ -327,7 +352,11 @@ h3 = f"""{topo()}
 </div>
 <div class="duas">
 <div><h2>Veículos cobrados por cliente</h2>
-{tabela(['Cliente no período', 'Veículos'], lin_cli, num=(1,), classes={len(lin_cli) - 1: 'tot'})}</div>
+{tabela(['Cliente no período', 'Status', 'Veículos'], lin_cli, num=(2,), classes=grupo_cli, status_col=1)}
+<h2>Histórico de pagamentos</h2>
+{tabela(['Mês apurado', 'Vencimento', 'Veículos', 'Valor bruto', 'Valor líquido', 'Pagamento'], lin_pag, num=(2, 3, 4),
+        classes={len(lin_pag) - 1: 'tot'})}
+<div class="nota">{e(nota_pag)}</div></div>
 <div><h2>Solicitar cancelamento ({len(pedir)})</h2>
 {tabela(['Placa', 'Modelo', 'Cliente no período'], [[p, modelo.get(p, ''), veic[p]['CLIENTE NO PERÍODO DA MEDIÇÃO']] for p in pedir])}
 <h2>Cancelamento já solicitado ({len(solicitado)})</h2>
@@ -399,7 +428,8 @@ with open(PROCESSO, 'wb') as f:
 TH = 'background:#1F3A5F;color:#fff;padding:4px 8px;border:1px solid #9BB7D4;font-size:11px;text-align:left'
 TD = 'padding:3px 8px;border:1px solid #D9D9D9;font-size:11px'
 TT = 'padding:4px 8px;border:1px solid #9BB7D4;font-size:11px;background:#DDEBF7;font-weight:bold'
-linhas_email = ''.join(f'<tr><td style="{TD}">{e(c)}</td><td style="{TD};text-align:right">{n}</td></tr>' for c, n in lin_cli[:-1])
+linhas_email = ''.join(f'<tr><td style="{TD}">{e(c)}</td><td style="{TD}">{e(st)}</td><td style="{TD};text-align:right">{n}</td></tr>'
+                       for c, st, n in lin_cli[:-1])
 email = f"""<html><head><meta charset="utf-8"><title>E-mail diretoria - CEABS {ROTULO}</title></head>
 <body style="font-family:Calibri,Arial,sans-serif;font-size:11pt">
 <p>Bom dia, Sr. Bruno Filho e Bruno Ribeiro.</p>
@@ -411,10 +441,10 @@ valor unitário de R$ {brl(total_pagar / n_equip)[3:]}. Dos veículos cobrados, 
 e {len(pedir)} serão solicitados agora ({', '.join(pedir)}).</p>
 <p>Solicito autorização para pagamento.</p>
 <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif">
-<tr><td colspan="2" style="{TH}">Medição {ROTULO} · NFS-e {nfs_txt} · vencimento {vencimento}</td></tr>
-<tr><td style="{TH}">CLIENTE NO PERÍODO</td><td style="{TH}">VEÍCULOS</td></tr>
+<tr><td colspan="3" style="{TH}">Medição {ROTULO} · NFS-e {nfs_txt} · vencimento {vencimento}</td></tr>
+<tr><td style="{TH}">CLIENTE NO PERÍODO</td><td style="{TH}">STATUS</td><td style="{TH}">VEÍCULOS</td></tr>
 {linhas_email}
-<tr><td style="{TT}">Total geral</td><td style="{TT};text-align:right">{lin_cli[-1][1]}</td></tr>
+<tr><td style="{TT}">Total geral</td><td style="{TT}"></td><td style="{TT};text-align:right">{lin_cli[-1][2]}</td></tr>
 </table>
 <p></p></body></html>"""
 EMAIL = os.path.join(SAIDA, f'EMAIL DIRETORIA - CEABS {SUFIXO}.html')
