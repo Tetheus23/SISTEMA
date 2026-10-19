@@ -1,2 +1,3 @@
 # Entregas com dados de funcionários (nomes/matrículas) — não versionar
 entregas/
+__pycache__/
