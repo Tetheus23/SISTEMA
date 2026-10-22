@@ -233,6 +233,9 @@ h2 { font-size: 11.5pt; color: #1F3A5F; border-left: 4px solid #2a78d6; padding-
 .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 4px; }
 .duas { display: grid; grid-template-columns: 1.15fr 1fr; gap: 12px; }
 tr.grupo td { border-top: 1px solid #9BB7D4; }
+.duas td { padding: 1.5px 5px; }
+.duas h2 { margin: 9px 0 4px; }
+.duas th { white-space: nowrap; }
 .card { border: 1px solid #d6dde6; border-radius: 4px; padding: 6px 8px; }
 .card.forte { background: #1F3A5F; color: #fff; border-color: #1F3A5F; }
 .card .r { font-size: 7pt; text-transform: uppercase; color: #6b7280; letter-spacing: .3px; }
@@ -341,6 +344,24 @@ nota_pag = ''
 if contestadas:
     nota_pag = (f'Fora do histórico: {" e ".join(x[1] for x in contestadas)} ({", ".join(sorted({str(x[2]).lower() for x in contestadas}))}, '
                 f'{brl(sum(x[4] for x in contestadas))}), contestadas com a CEABS e não pagas.')
+# veículos que saíram da medição (estavam no mês anterior e não estão neste) e os que entraram
+mens_ant = {r['Chassi']: r for r in itens_ant if MENSAL(r)}
+mens = {r['Chassi']: r for r in itens if MENSAL(r)}
+saiu = [r for c, r in mens_ant.items() if c not in mens]
+entrou = sorted((r for c, r in mens.items() if c not in mens_ant), key=lambda r: r['Placa'] or '')
+por_canc = defaultdict(list)
+for r in saiu:
+    por_canc[data(r['Data de Cancelamento']) or 'sem data'].append(r['Placa'] or r['Chassi'])
+lin_saiu = [[d, ', '.join(sorted(ps)), len(ps)]
+            for d, ps in sorted(por_canc.items(), key=lambda kv: dt.datetime.strptime(kv[0], '%d/%m/%Y') if '/' in kv[0] else dt.datetime.max)]
+sem_retirada = sorted(r['Placa'] for r in saiu if not r['Data de Retirada'] and r['STATUS'] == 'CANCELADO E RETIRADA A CONFIRMAR')
+nota_saiu = (f'{n_equip_ant} em {mes_txt(anterior)} − {len(saiu)} que saíram + {len(entrou)} que entraram = {n_equip} em {mes_txt(ref)}.'
+             + (f' Retirada a confirmar: {", ".join(sem_retirada)}.' if sem_retirada else ''))
+h_saiu = (f'<h2>Saíram da medição ({len(saiu)})</h2>'
+          + tabela(['Cancelado em', 'Placas', 'Qtde.'], lin_saiu, num=(2,)) + f'<div class="nota">{e(nota_saiu)}</div>')
+if entrou:
+    h_saiu += (f'<h2>Entraram na medição ({len(entrou)})</h2>'
+               + tabela(['Placa', 'Produto', 'Instalação'], [[r['Placa'], r['Produto'], data(r['Data de Instalação'])] for r in entrou]))
 h3 = f"""{topo()}
 <div class="secao">3 · RELATÓRIO RESUMIDO</div>
 <h1>CEABS · Rastreadores · {ROTULO}</h1>
@@ -356,7 +377,8 @@ h3 = f"""{topo()}
 <h2>Histórico de pagamentos</h2>
 {tabela(['Mês apurado', 'Vencimento', 'Veículos', 'Valor bruto', 'Valor líquido', 'Pagamento'], lin_pag, num=(2, 3, 4),
         classes={len(lin_pag) - 1: 'tot'})}
-<div class="nota">{e(nota_pag)}</div></div>
+<div class="nota">{e(nota_pag)}</div>
+{h_saiu}</div>
 <div><h2>Solicitar cancelamento ({len(pedir)})</h2>
 {tabela(['Placa', 'Modelo', 'Cliente no período'], [[p, modelo.get(p, ''), veic[p]['CLIENTE NO PERÍODO DA MEDIÇÃO']] for p in pedir])}
 <h2>Cancelamento já solicitado ({len(solicitado)})</h2>
@@ -437,7 +459,7 @@ email = f"""<html><head><meta charset="utf-8"><title>E-mail diretoria - CEABS {R
 NFS-e {nfs_txt}, valor R$ {brl(total_pagar)[3:]}, vencimento {vencimento}, conforme relatório abaixo e processo em anexo
 (FORPAG, notas fiscais e boletos, relatório resumido e consolidado).</p>
 <p>Foram cobrados {n_equip} equipamentos (mês anterior: {n_equip_ant}), valor líquido R$ {brl(total_pagar)[3:]} (mês anterior: R$ {brl(liq_ant)[3:]}),
-valor unitário de R$ {brl(total_pagar / n_equip)[3:]}. Dos veículos cobrados, {len(solicitado)} já tiveram o cancelamento solicitado
+valor unitário de R$ {brl(total_pagar / n_equip)[3:]}. Saíram da medição {len(saiu)} veículos, cancelados em {mes_txt(anterior)}{f' (e entraram {len(entrou)})' if entrou else ''}. Dos veículos cobrados, {len(solicitado)} já tiveram o cancelamento solicitado
 e {len(pedir)} serão solicitados agora ({', '.join(pedir)}).</p>
 <p>Solicito autorização para pagamento.</p>
 <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif">
